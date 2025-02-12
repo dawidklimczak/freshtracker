@@ -36,25 +36,18 @@ st.markdown("""
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
         gap: 0.5rem;
-        padding: 0.5rem;
-    }
-    .camera-container {
-        background: white;
-        padding: 1rem 0;
-        border-bottom: 1px solid #eee;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # Inicjalizacja stanu sesji
 if 'products' not in st.session_state:
-    st.session_state.products = []  # Lista produktów, każdy produkt to słownik {id, images}
-if 'current_product_id' not in st.session_state:
-    st.session_state.current_product_id = None
+    # Automatycznie dodaj pierwszy produkt przy starcie
+    st.session_state.products = [{"id": str(uuid.uuid4()), "images": []}]
 if 'analysis_results' not in st.session_state:
     st.session_state.analysis_results = []
 
-# Konfiguracja klientów
+# Konfiguracja OpenAI
 openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 def setup_google_sheets():
@@ -66,11 +59,22 @@ def setup_google_sheets():
     sheet = client.open(st.secrets["spreadsheet_name"]).sheet1
     return sheet
 
+def process_image(image_file):
+    image = Image.open(image_file)
+    baseheight = 300
+    hpercent = (baseheight/float(image.size[1]))
+    wsize = int((float(image.size[0])*float(hpercent)))
+    image = image.resize((wsize, baseheight), Image.Resampling.LANCZOS)
+    
+    buf = io.BytesIO()
+    image.save(buf, format='JPEG', quality=85)
+    buf.seek(0)
+    return buf
+
 def analyze_product_images(images):
     import json
     import re
     
-    # Przygotuj listę obrazów w formacie base64
     image_contents = []
     for img in images:
         image_data = img.getvalue()
@@ -83,7 +87,6 @@ def analyze_product_images(images):
         })
     
     try:
-        # Dodaj tekst na początku listy content
         content = [
             {
                 "type": "text",
@@ -91,7 +94,7 @@ def analyze_product_images(images):
 1. Nazwa produktu
 2. Data ważności (w formacie YYYY-MM-DD)
 
-Odpowiedz dokładnie w tym formacie, bez dodatkowych znaczników czy komentarzy:
+Odpowiedz dokładnie w tym formacie:
 {"product_name": "pełna nazwa produktu", "expiry_date": "YYYY-MM-DD"}
 
 Jeśli nie możesz znaleźć którejś informacji, użyj null."""
@@ -101,22 +104,13 @@ Jeśli nie możesz znaleźć którejś informacji, użyj null."""
         
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{
-                "role": "user",
-                "content": content
-            }],
+            messages=[{"role": "user", "content": content}],
             max_tokens=300
         )
         
         response_content = response.choices[0].message.content
         clean_content = re.sub(r'```json\s*|\s*```', '', response_content).strip()
-        
-        try:
-            result = json.loads(clean_content)
-            return result
-        except json.JSONDecodeError as e:
-            st.error(f"Błąd parsowania JSON: {e}")
-            return None
+        return json.loads(clean_content)
     except Exception as e:
         st.error(f"Błąd podczas analizy obrazów: {str(e)}")
         return None
@@ -135,89 +129,60 @@ def save_to_spreadsheet(data):
         st.error(f"Błąd podczas zapisywania do arkusza: {str(e)}")
         return False
 
-def process_image(image_file):
-    # Zmniejsz rozmiar zdjęcia
-    image = Image.open(image_file)
-    baseheight = 300
-    hpercent = (baseheight/float(image.size[1]))
-    wsize = int((float(image.size[0])*float(hpercent)))
-    image = image.resize((wsize, baseheight), Image.Resampling.LANCZOS)
-    
-    # Zapisz zmniejszone zdjęcie
-    buf = io.BytesIO()
-    image.save(buf, format='JPEG', quality=85)
-    buf.seek(0)
-    return buf
-
 # Interface główny
 st.title("🥫 FreshTrack - Skaner Produktów")
-
-# Przyciski nawigacyjne
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("➕ Nowy produkt", use_container_width=True):
-        new_product_id = str(uuid.uuid4())
-        st.session_state.products.append({"id": new_product_id, "images": []})
-        st.session_state.current_product_id = new_product_id
-        st.rerun()
 
 # Sekcja kamery
 camera_input = st.camera_input("📸 Zrób zdjęcie", key="camera")
 if camera_input is not None:
-    # Jeśli nie ma aktywnego produktu, stwórz nowy
-    if st.session_state.current_product_id is None:
-        new_product_id = str(uuid.uuid4())
-        st.session_state.products.append({"id": new_product_id, "images": []})
-        st.session_state.current_product_id = new_product_id
-    
-    # Znajdź aktywny produkt i dodaj do niego zdjęcie
-    for product in st.session_state.products:
-        if product["id"] == st.session_state.current_product_id:
-            processed_image = process_image(camera_input)
-            product["images"].append(processed_image)
-            st.rerun()
+    # Dodaj zdjęcie do ostatniego produktu
+    processed_image = process_image(camera_input)
+    st.session_state.products[-1]["images"].append(processed_image)
+    st.rerun()
+
+# Przycisk nowego produktu
+if st.button("➕ Nowy produkt", type="primary"):
+    st.session_state.products.append({"id": str(uuid.uuid4()), "images": []})
+    st.rerun()
 
 # Wyświetlanie produktów
 for idx, product in enumerate(st.session_state.products):
-    with st.container():
-        st.markdown(f"### 📦 Produkt {idx + 1}")
-        
-        # Siatka zdjęć
-        if product["images"]:
-            cols = st.columns(len(product["images"]))
-            for img_idx, img in enumerate(product["images"]):
-                with cols[img_idx]:
-                    st.image(img, use_container_width=True)
-                    if st.button("🗑️", key=f"delete_{product['id']}_{img_idx}"):
-                        product["images"].pop(img_idx)
-                        st.rerun()
-        
-        # Przyciski akcji
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📸 Dodaj zdjęcie", key=f"add_{product['id']}", 
-                        disabled=st.session_state.current_product_id != product["id"]):
-                st.session_state.current_product_id = product["id"]
-        with col2:
-            if st.button("🗑️ Usuń produkt", key=f"delete_product_{product['id']}"):
-                st.session_state.products.remove(product)
-                if st.session_state.current_product_id == product["id"]:
-                    st.session_state.current_product_id = None
-                st.rerun()
-        
-        st.markdown("---")
+    st.markdown(f"### 📦 Produkt {idx + 1}")
+    
+    if product["images"]:
+        # Wyświetl zdjęcia w rzędzie
+        cols = st.columns(len(product["images"]))
+        for img_idx, img in enumerate(product["images"]):
+            with cols[img_idx]:
+                st.image(img, use_container_width=True)
+                if st.button("🗑️ Usuń", key=f"delete_{product['id']}_{img_idx}"):
+                    product["images"].pop(img_idx)
+                    st.rerun()
+    else:
+        st.info("Zrób zdjęcie produktu...")
+    
+    # Przycisk usuwania produktu
+    if len(st.session_state.products) > 1:  # Nie pozwól usunąć ostatniego produktu
+        if st.button("🗑️ Usuń produkt", key=f"delete_product_{product['id']}"):
+            st.session_state.products.remove(product)
+            st.rerun()
+    
+    st.markdown("---")
 
-# Przycisk analizy
-if st.session_state.products:
+# Przycisk analizy wszystkich produktów
+if any(len(p["images"]) > 0 for p in st.session_state.products):
     if st.button("🔍 Analizuj wszystkie produkty", type="primary"):
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        for idx, product in enumerate(st.session_state.products):
+        total_products = len([p for p in st.session_state.products if p["images"]])
+        processed = 0
+        
+        for product in st.session_state.products:
             if product["images"]:
-                progress = (idx + 1) / len(st.session_state.products)
-                progress_bar.progress(progress)
-                status_text.text(f"Analizuję produkt {idx + 1} z {len(st.session_state.products)}...")
+                processed += 1
+                progress_bar.progress(processed / total_products)
+                status_text.text(f"Analizuję produkt {processed} z {total_products}...")
                 
                 result = analyze_product_images(product["images"])
                 if result:
@@ -225,15 +190,14 @@ if st.session_state.products:
                     if save_to_spreadsheet(result):
                         st.success(f"✅ Zapisano: {result['product_name']}")
         
+        # Wyczyść po zakończeniu
+        st.session_state.products = [{"id": str(uuid.uuid4()), "images": []}]  # Nowy produkt po analizie
         progress_bar.empty()
         status_text.empty()
-        st.session_state.products = []
-        st.session_state.current_product_id = None
         st.rerun()
 
-# Przycisk do wyczyszczenia sesji
+# Przycisk do wyczyszczenia wszystkiego
 if st.sidebar.button("🗑️ Wyczyść wszystko"):
-    st.session_state.products = []
-    st.session_state.current_product_id = None
+    st.session_state.products = [{"id": str(uuid.uuid4()), "images": []}]
     st.session_state.analysis_results = []
     st.rerun()
