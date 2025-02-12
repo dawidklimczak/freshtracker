@@ -132,28 +132,27 @@ def save_to_spreadsheet(data):
 # Interface główny
 st.title("🥫 FreshTrack - Skaner Produktów")
 
+# Śledzenie ostatnio dodanego zdjęcia
+if 'last_photo_id' not in st.session_state:
+    st.session_state.last_photo_id = None
+
 # Sekcja kamery
 camera_input = st.camera_input("📸 Zrób zdjęcie", key="camera")
 if camera_input is not None:
-    # Zabezpieczenie przed duplikacją - sprawdzamy czy to zdjęcie już istnieje
-    processed_image = process_image(camera_input)
-    current_images = st.session_state.products[-1]["images"]
+    # Generujemy unikalny identyfikator dla tego zdjęcia
+    current_photo_id = hash(camera_input.getvalue())
     
-    # Porównujemy nowe zdjęcie z istniejącymi
-    is_duplicate = False
-    if current_images:
-        new_data = processed_image.getvalue()
-        for existing_img in current_images:
-            if existing_img.getvalue() == new_data:
-                is_duplicate = True
-                break
-    
-    if not is_duplicate:
+    # Sprawdzamy czy to zdjęcie nie było już wcześniej przetworzone
+    if current_photo_id != st.session_state.last_photo_id:
+        processed_image = process_image(camera_input)
         st.session_state.products[-1]["images"].append(processed_image)
+        st.session_state.last_photo_id = current_photo_id
         st.rerun()
 
 # Przycisk nowego produktu
 if st.button("➕ Nowy produkt", type="primary"):
+    # Resetujemy identyfikator ostatniego zdjęcia
+    st.session_state.last_photo_id = None
     st.session_state.products.append({"id": str(uuid.uuid4()), "images": []})
     st.rerun()
 
