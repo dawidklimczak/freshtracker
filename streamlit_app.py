@@ -109,7 +109,7 @@ if camera_input is not None and camera_input not in st.session_state.captured_im
     # Dodaj zdjęcie do sesji tylko jeśli jeszcze nie istnieje
     st.session_state.captured_images.append(camera_input)
     st.success(f"Dodano zdjęcie! Liczba zdjęć: {len(st.session_state.captured_images)}")
-    st.experimental_rerun()  # Odśwież stronę po dodaniu zdjęcia
+    st.rerun()  # Nowa wersja funkcji rerun
 
 # Wyświetlanie zrobionych zdjęć
 if st.session_state.captured_images:
@@ -122,7 +122,7 @@ if st.session_state.captured_images:
         with col2:
             if st.button(f"Usuń zdjęcie {idx + 1}", key=f"delete_{idx}"):
                 st.session_state.captured_images.pop(idx)
-                st.experimental_rerun()
+                st.rerun()
 
     st.write("### 2. Analiza zdjęć")
     if st.button("Analizuj wszystkie zdjęcia"):
@@ -148,4 +148,4 @@ if st.session_state.analysis_results:
 if st.button("Wyczyść wszystko"):
     st.session_state.captured_images = []
     st.session_state.analysis_results = []
-    st.experimental_rerun()
+    st.rerun()
