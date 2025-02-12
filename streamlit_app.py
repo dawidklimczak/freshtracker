@@ -135,10 +135,22 @@ st.title("🥫 FreshTrack - Skaner Produktów")
 # Sekcja kamery
 camera_input = st.camera_input("📸 Zrób zdjęcie", key="camera")
 if camera_input is not None:
-    # Dodaj zdjęcie do ostatniego produktu
+    # Zabezpieczenie przed duplikacją - sprawdzamy czy to zdjęcie już istnieje
     processed_image = process_image(camera_input)
-    st.session_state.products[-1]["images"].append(processed_image)
-    st.rerun()
+    current_images = st.session_state.products[-1]["images"]
+    
+    # Porównujemy nowe zdjęcie z istniejącymi
+    is_duplicate = False
+    if current_images:
+        new_data = processed_image.getvalue()
+        for existing_img in current_images:
+            if existing_img.getvalue() == new_data:
+                is_duplicate = True
+                break
+    
+    if not is_duplicate:
+        st.session_state.products[-1]["images"].append(processed_image)
+        st.rerun()
 
 # Przycisk nowego produktu
 if st.button("➕ Nowy produkt", type="primary"):
